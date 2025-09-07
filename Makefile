@@ -41,7 +41,7 @@ install: setup
 	@cp wayopenfan.py $(INSTALL_DIR)/
 	@cp run.sh $(INSTALL_DIR)/
 	@cp requirements.txt $(INSTALL_DIR)/
-	@cp icon.svg $(INSTALL_DIR)/
+	@cp fan-icon.svg $(INSTALL_DIR)/
 	
 	# Create desktop entry with correct path
 	@echo "[Desktop Entry]" > $(DESKTOP_DIR)/wayopenfan.desktop
