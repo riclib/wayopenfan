@@ -391,6 +391,9 @@ class ControlPopup(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fan_widgets: Dict[str, FanControlWidget] = {}
+        self.fans: Dict[str, Fan] = {}  # Store fan references
+        self.update_timer = None
+        self.update_workers = []
         self.setup_ui()
         
         # Set window title for identification
@@ -571,6 +574,7 @@ class ControlPopup(QWidget):
                 
             widget = FanControlWidget(fan)
             self.fan_widgets[fan.serial_number] = widget
+            self.fans[fan.serial_number] = fan  # Store fan reference
             
             # Add separator between fans
             if len(self.fan_widgets) > 1:
@@ -589,6 +593,8 @@ class ControlPopup(QWidget):
             self.fans_layout.removeWidget(widget)
             widget.deleteLater()
             del self.fan_widgets[serial]
+            if serial in self.fans:
+                del self.fans[serial]
             
             # Show "no fans" label if no fans remain
             if len(self.fan_widgets) == 0:
@@ -597,6 +603,7 @@ class ControlPopup(QWidget):
     def update_fan(self, fan: Fan):
         """Update a fan control widget"""
         if fan.serial_number in self.fan_widgets:
+            self.fans[fan.serial_number] = fan  # Update stored fan reference
             self.fan_widgets[fan.serial_number].update_state()
             
     def showEvent(self, event):
@@ -604,10 +611,62 @@ class ControlPopup(QWidget):
         super().showEvent(event)
         # Note: Window positioning doesn't work on Wayland
         # Position is controlled by Hyprland window rules instead
-        # Update all fan states when showing
+        
+        # Start real-time updates when window is shown
+        self.start_updates()
+        
+        # Update all fan states immediately
         for widget in self.fan_widgets.values():
             widget.update_state()
             
+    def hideEvent(self, event):
+        """Handle hide event"""
+        super().hideEvent(event)
+        # Stop real-time updates when window is hidden
+        self.stop_updates()
+    
+    def start_updates(self):
+        """Start real-time fan status updates"""
+        if not self.update_timer:
+            self.update_timer = QTimer()
+            self.update_timer.timeout.connect(self.update_all_fans)
+            self.update_timer.start(500)  # Update every 500ms
+    
+    def stop_updates(self):
+        """Stop real-time fan status updates"""
+        if self.update_timer:
+            self.update_timer.stop()
+            self.update_timer = None
+        # Clean up any running workers
+        self.update_workers = [w for w in self.update_workers if w.isRunning()]
+    
+    def update_all_fans(self):
+        """Update status for all fans"""
+        for fan in self.fans.values():
+            # Skip if a worker is already running for this fan
+            if not any(w.isRunning() and w.fan.serial_number == fan.serial_number 
+                      for w in self.update_workers):
+                worker = APIWorker(fan, 'status')
+                worker.result_ready.connect(self.on_status_update)
+                worker.start()
+                self.update_workers.append(worker)
+    
+    @pyqtSlot(str, bool, int, int)
+    def on_status_update(self, serial, is_on, speed, rpm):
+        """Handle status update from worker"""
+        if serial in self.fans:
+            fan = self.fans[serial]
+            # Only update if values changed
+            if fan.is_on != is_on or fan.speed != speed or fan.rpm != rpm:
+                fan.is_on = is_on
+                fan.speed = speed
+                fan.rpm = rpm
+                if serial in self.fan_widgets:
+                    self.fan_widgets[serial].update_state()
+        
+        # Clean up finished workers
+        self.update_workers = [w for w in self.update_workers if w.isRunning()]
+    
     def refresh_requested(self):
         """Signal that refresh was requested"""
         pass
