@@ -21,49 +21,8 @@ from PyQt6.QtWidgets import (
     QSlider, QLabel, QHBoxLayout, QVBoxLayout, QCheckBox, QFrame,
     QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QPoint, QRect, QThread, pyqtSlot, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QPoint, QRect, QEvent
 from PyQt6.QtGui import QIcon, QAction, QCursor, QScreen, QPalette, QColor, QMouseEvent
-
-
-class APIWorker(QThread):
-    """Worker thread for API calls to avoid blocking UI"""
-    result_ready = pyqtSignal(str, bool, int, int)  # serial, is_on, speed, rpm
-    
-    def __init__(self, fan, operation, value=None):
-        super().__init__()
-        self.fan = fan
-        self.operation = operation
-        self.value = value
-        
-    def run(self):
-        """Execute API call in thread"""
-        try:
-            if self.operation == 'toggle':
-                success = self.fan.toggle()
-                if success:
-                    self.result_ready.emit(self.fan.serial_number, self.fan.is_on, self.fan.speed, self.fan.rpm)
-            elif self.operation == 'speed':
-                success = self.fan.set_speed(self.value)
-                if success:
-                    self.result_ready.emit(self.fan.serial_number, self.fan.is_on, self.fan.speed, self.fan.rpm)
-            elif self.operation == 'power':
-                success = self.fan.set_power(self.value)
-                if success:
-                    self.result_ready.emit(self.fan.serial_number, self.fan.is_on, self.fan.speed, self.fan.rpm)
-            elif self.operation == 'status':
-                # Create a temporary fan copy to avoid modifying the shared object
-                temp_fan = Fan(
-                    name=self.fan.name,
-                    ip=self.fan.ip,
-                    serial_number=self.fan.serial_number,
-                    port=self.fan.port
-                )
-                # Get status on the copy
-                temp_fan.get_status()
-                # Emit the new values
-                self.result_ready.emit(temp_fan.serial_number, temp_fan.is_on, temp_fan.speed, temp_fan.rpm)
-        except Exception as e:
-            print(f"API Worker error: {e}")
 
 
 @dataclass
@@ -260,7 +219,6 @@ class FanControlWidget(QWidget):
     def __init__(self, fan: Fan, parent=None):
         super().__init__(parent)
         self.fan = fan
-        self.api_worker = None
         self.speed_timer = None
         self.pending_speed = None
         self.setup_ui()
@@ -327,10 +285,16 @@ class FanControlWidget(QWidget):
     def on_power_changed(self, state):
         """Handle power checkbox change"""
         is_on = state == Qt.CheckState.Checked.value
-        # Run in thread
-        self.api_worker = APIWorker(self.fan, 'power', is_on)
-        self.api_worker.result_ready.connect(self.on_api_result)
-        self.api_worker.start()
+        # Set power in background thread
+        def set_power():
+            self.fan.set_power(is_on)
+        thread = threading.Thread(target=set_power)
+        thread.daemon = True
+        thread.start()
+        # Update UI immediately
+        self.fan.is_on = is_on
+        if is_on and self.fan.speed == 0:
+            self.fan.speed = 50  # Default to 50% when turning on
         
     def on_speed_changed(self, value):
         """Handle speed slider change with heavy throttling"""
@@ -351,19 +315,17 @@ class FanControlWidget(QWidget):
     def apply_pending_speed(self):
         """Apply the pending speed change"""
         if self.pending_speed is not None:
-            self.api_worker = APIWorker(self.fan, 'speed', self.pending_speed)
-            self.api_worker.result_ready.connect(self.on_api_result)
-            self.api_worker.start()
+            value = self.pending_speed
             self.pending_speed = None
-            
-    @pyqtSlot(str, bool, int, int)
-    def on_api_result(self, serial, is_on, speed, rpm):
-        """Handle API result from worker thread"""
-        if serial == self.fan.serial_number:
-            self.fan.is_on = is_on
-            self.fan.speed = speed
-            self.fan.rpm = rpm
-            self.update_state()
+            # Set speed in background thread
+            def set_speed():
+                self.fan.set_speed(value)
+            thread = threading.Thread(target=set_speed)
+            thread.daemon = True
+            thread.start()
+            # Update local state immediately
+            self.fan.speed = value
+            self.fan.is_on = value > 0
         
     def update_state(self):
         """Update widget to reflect current fan state"""
@@ -418,7 +380,6 @@ class ControlPopup(QWidget):
         self.fan_widgets: Dict[str, FanControlWidget] = {}
         self.fans: Dict[str, Fan] = {}  # Store fan references
         self.update_timer = None
-        self.update_workers = []
         self.setup_ui()
         
         # Set window title for identification
@@ -689,60 +650,96 @@ class ControlPopup(QWidget):
         # Stop real-time updates when window is hidden
         self.stop_updates()
     
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # Stop updates
+        self.stop_updates()
+        super().closeEvent(event)
+    
     def start_updates(self):
         """Start real-time fan status updates"""
         if not self.update_timer:
             self.update_timer = QTimer()
             self.update_timer.timeout.connect(self.update_all_fans)
-            self.update_timer.start(1000)  # Update every 1 second
+            self.update_timer.start(500)  # Update every 500ms
     
     def stop_updates(self):
         """Stop real-time fan status updates"""
         if self.update_timer:
             self.update_timer.stop()
             self.update_timer = None
-        # Clean up any running workers
-        self.update_workers = [w for w in self.update_workers if w.isRunning()]
     
     def update_all_fans(self):
-        """Update status for all fans"""
-        for fan in self.fans.values():
-            # Skip if a worker is already running for this fan
-            if not any(w.isRunning() and w.fan.serial_number == fan.serial_number 
-                      for w in self.update_workers):
-                worker = APIWorker(fan, 'status')
-                worker.result_ready.connect(self.on_status_update)
-                worker.start()
-                self.update_workers.append(worker)
-    
-    @pyqtSlot(str, bool, int, int)
-    def on_status_update(self, serial, is_on, speed, rpm):
-        """Handle status update from worker"""
-        if serial in self.fans:
-            fan = self.fans[serial]
-            # Only update if values changed
-            if fan.is_on != is_on or fan.speed != speed or fan.rpm != rpm:
-                fan.is_on = is_on
-                fan.speed = speed
-                fan.rpm = rpm
-                if serial in self.fan_widgets:
-                    self.fan_widgets[serial].update_state()
+        """Update status for all fans in background thread"""
+        def update_fans():
+            for serial, fan in self.fans.items():
+                try:
+                    # Create temporary fan to get status without modifying shared state
+                    temp_fan = Fan(
+                        name=fan.name,
+                        ip=fan.ip,
+                        port=fan.port,
+                        serial_number=fan.serial_number
+                    )
+                    temp_fan.get_status()
+                    
+                    # Only update if values changed
+                    if (fan.is_on != temp_fan.is_on or 
+                        fan.speed != temp_fan.speed or 
+                        fan.rpm != temp_fan.rpm):
+                        fan.is_on = temp_fan.is_on
+                        fan.speed = temp_fan.speed
+                        fan.rpm = temp_fan.rpm
+                        
+                        # Schedule UI update on main thread
+                        if serial in self.fan_widgets:
+                            QTimer.singleShot(0, lambda s=serial: self.fan_widgets[s].update_state())
+                except Exception as e:
+                    print(f"Error updating fan {serial}: {e}")
         
-        # Clean up finished workers
-        self.update_workers = [w for w in self.update_workers if w.isRunning()]
+        # Run update in background thread
+        thread = threading.Thread(target=update_fans)
+        thread.daemon = True
+        thread.start()
     
     def set_all_fans_speed(self, speed: int):
         """Set all fans to the same speed"""
-        for serial, fan in self.fans.items():
-            # Update fan speed
-            worker = APIWorker(fan, 'speed', speed)
-            worker.result_ready.connect(self.on_status_update)
-            worker.start()
-            # Update slider immediately for responsiveness
+        # Stop the update timer temporarily to avoid conflicts
+        if self.update_timer and self.update_timer.isActive():
+            self.update_timer.stop()
+        
+        # Create a function to set speeds in background
+        def set_speeds():
+            for serial, fan in self.fans.items():
+                try:
+                    # Set speed on the actual fan
+                    fan.set_speed(speed)
+                    # Update the local state
+                    fan.speed = speed
+                    fan.is_on = speed > 0
+                except Exception as e:
+                    print(f"Error setting speed for fan {serial}: {e}")
+        
+        # Run in a separate thread
+        thread = threading.Thread(target=set_speeds)
+        thread.daemon = True
+        thread.start()
+        
+        # Update UI immediately for responsiveness
+        for serial in self.fans:
             if serial in self.fan_widgets:
                 widget = self.fan_widgets[serial]
+                widget.speed_slider.blockSignals(True)
                 widget.speed_slider.setValue(speed)
+                widget.speed_slider.blockSignals(False)
                 widget.speed_value.setText(f"{speed}%")
+                widget.power_checkbox.blockSignals(True)
+                widget.power_checkbox.setChecked(speed > 0)
+                widget.power_checkbox.blockSignals(False)
+        
+        # Restart the update timer after a delay
+        if self.update_timer:
+            QTimer.singleShot(1000, lambda: self.update_timer.start(500) if self.update_timer else None)
     
     def refresh_requested(self):
         """Signal that refresh was requested"""
@@ -766,7 +763,6 @@ class WayOpenFanTray(QSystemTrayIcon):
         super().__init__()
         self.app = app
         self.fans: Dict[str, Fan] = {}
-        self.update_workers = []
         
         # Create popup window
         self.popup = ControlPopup()
@@ -855,25 +851,34 @@ class WayOpenFanTray(QSystemTrayIcon):
             
     def update_fan_states(self):
         """Periodically update fan states in background"""
-        for fan in self.fans.values():
-            worker = APIWorker(fan, 'status')
-            worker.result_ready.connect(self.on_status_update)
-            worker.start()
-            self.update_workers.append(worker)
-            
-    @pyqtSlot(str, bool, int, int)
-    def on_status_update(self, serial, is_on, speed, rpm):
-        """Handle status update from worker"""
-        if serial in self.fans:
-            fan = self.fans[serial]
-            if fan.is_on != is_on or fan.speed != speed or fan.rpm != rpm:
-                fan.is_on = is_on
-                fan.speed = speed
-                fan.rpm = rpm
-                self.popup.update_fan(fan)
+        def update_all():
+            for serial, fan in self.fans.items():
+                try:
+                    # Create temporary fan to get status
+                    temp_fan = Fan(
+                        name=fan.name,
+                        ip=fan.ip,
+                        port=fan.port,
+                        serial_number=fan.serial_number
+                    )
+                    temp_fan.get_status()
+                    
+                    # Only update if values changed
+                    if (fan.is_on != temp_fan.is_on or 
+                        fan.speed != temp_fan.speed or 
+                        fan.rpm != temp_fan.rpm):
+                        fan.is_on = temp_fan.is_on
+                        fan.speed = temp_fan.speed
+                        fan.rpm = temp_fan.rpm
+                        # Update popup if it exists
+                        QTimer.singleShot(0, lambda f=fan: self.popup.update_fan(f))
+                except Exception as e:
+                    print(f"Error updating fan {serial}: {e}")
         
-        # Clean up finished workers
-        self.update_workers = [w for w in self.update_workers if w.isRunning()]
+        # Run in background thread
+        thread = threading.Thread(target=update_all)
+        thread.daemon = True
+        thread.start()
                 
     def refresh_fans(self):
         """Manually refresh fan discovery"""
@@ -882,8 +887,21 @@ class WayOpenFanTray(QSystemTrayIcon):
         
     def quit_application(self):
         """Quit the application"""
+        # Stop timers first
+        if self.update_timer:
+            self.update_timer.stop()
+        
+        # Stop popup updates
+        self.popup.stop_updates()
+        
+        
+        # Stop discovery
         self.discovery.stop()
+        
+        # Close popup
         self.popup.close()
+        
+        # Quit app
         self.app.quit()
 
 
