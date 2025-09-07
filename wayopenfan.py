@@ -693,7 +693,8 @@ class ControlPopup(QWidget):
                         
                         # Schedule UI update on main thread
                         if serial in self.fan_widgets:
-                            QTimer.singleShot(0, lambda s=serial: self.fan_widgets[s].update_state())
+                            widget = self.fan_widgets[serial]
+                            QTimer.singleShot(0, widget.update_state)
                 except Exception as e:
                     print(f"Error updating fan {serial}: {e}")
         
@@ -871,7 +872,8 @@ class WayOpenFanTray(QSystemTrayIcon):
                         fan.speed = temp_fan.speed
                         fan.rpm = temp_fan.rpm
                         # Update popup if it exists
-                        QTimer.singleShot(0, lambda f=fan: self.popup.update_fan(f))
+                        final_fan = fan  # Capture the fan reference
+                        QTimer.singleShot(0, lambda: self.popup.update_fan(final_fan))
                 except Exception as e:
                     print(f"Error updating fan {serial}: {e}")
         
