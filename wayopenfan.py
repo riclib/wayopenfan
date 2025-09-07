@@ -51,8 +51,17 @@ class APIWorker(QThread):
                 if success:
                     self.result_ready.emit(self.fan.serial_number, self.fan.is_on, self.fan.speed, self.fan.rpm)
             elif self.operation == 'status':
-                self.fan.get_status()
-                self.result_ready.emit(self.fan.serial_number, self.fan.is_on, self.fan.speed, self.fan.rpm)
+                # Create a temporary fan copy to avoid modifying the shared object
+                temp_fan = Fan(
+                    name=self.fan.name,
+                    ip=self.fan.ip,
+                    serial_number=self.fan.serial_number,
+                    port=self.fan.port
+                )
+                # Get status on the copy
+                temp_fan.get_status()
+                # Emit the new values
+                self.result_ready.emit(temp_fan.serial_number, temp_fan.is_on, temp_fan.speed, temp_fan.rpm)
         except Exception as e:
             print(f"API Worker error: {e}")
 
