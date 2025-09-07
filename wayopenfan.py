@@ -467,6 +467,33 @@ class ControlPopup(QWidget):
         self.no_fans_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fans_layout.addWidget(self.no_fans_label)
         
+        # Separator before preset buttons
+        preset_separator = QFrame()
+        preset_separator.setFrameShape(QFrame.Shape.HLine)
+        preset_separator.setObjectName("separator")
+        self.main_layout.addWidget(preset_separator)
+        
+        # Preset speed buttons
+        preset_layout = QHBoxLayout()
+        preset_layout.setSpacing(4)
+        
+        preset_speeds = [
+            ("Off", 0),
+            ("25%", 25),
+            ("50%", 50),
+            ("75%", 75),
+            ("100%", 100)
+        ]
+        
+        for label, speed in preset_speeds:
+            btn = QPushButton(label)
+            btn.setObjectName("preset_btn")
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda checked, s=speed: self.set_all_fans_speed(s))
+            preset_layout.addWidget(btn)
+        
+        self.main_layout.addLayout(preset_layout)
+        
         # Bottom buttons - more compact
         button_layout = QHBoxLayout()
         button_layout.setSpacing(8)
@@ -584,6 +611,18 @@ class ControlPopup(QWidget):
             #refresh_btn, #close_btn {
                 font-size: 14px;
             }
+            
+            #preset_btn {
+                padding: 4px 8px;
+                font-size: 11px;
+                min-width: 0;
+                background-color: #2d2d2d;
+            }
+            
+            #preset_btn:hover {
+                background-color: #0d7377;
+                border-color: #14b8a6;
+            }
         """)
         
         # Set fixed size to prevent stretching
@@ -691,6 +730,19 @@ class ControlPopup(QWidget):
         
         # Clean up finished workers
         self.update_workers = [w for w in self.update_workers if w.isRunning()]
+    
+    def set_all_fans_speed(self, speed: int):
+        """Set all fans to the same speed"""
+        for serial, fan in self.fans.items():
+            # Update fan speed
+            worker = APIWorker(fan, 'speed', speed)
+            worker.result_ready.connect(self.on_status_update)
+            worker.start()
+            # Update slider immediately for responsiveness
+            if serial in self.fan_widgets:
+                widget = self.fan_widgets[serial]
+                widget.speed_slider.setValue(speed)
+                widget.speed_value.setText(f"{speed}%")
     
     def refresh_requested(self):
         """Signal that refresh was requested"""

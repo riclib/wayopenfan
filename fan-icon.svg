@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <!-- Fan blades -->
-  <g transform="translate(50,50)">
+  <!-- Rotate entire fan 45 degrees -->
+  <g transform="translate(50,50) rotate(45)">
     <!-- Center circle -->
-    <circle r="8" fill="#4a9eff" stroke="#2c7fd8" stroke-width="2"/>
+    <circle r="8" fill="#ffffff" stroke="#e0e0e0" stroke-width="2"/>
     
-    <!-- Fan blades (4 blades) -->
-    <g id="blades" stroke="#2c7fd8" stroke-width="1.5" fill="#6bb2ff">
+    <!-- Fan blades (4 blades) in white -->
+    <g id="blades" stroke="#e0e0e0" stroke-width="1.5" fill="#ffffff">
       <!-- Top blade -->
       <path d="M 0,-8 Q -12,-20 -8,-35 Q 0,-40 8,-35 Q 12,-20 0,-8 Z"/>
       <!-- Right blade -->
@@ -18,6 +18,6 @@
     </g>
     
     <!-- Center dot -->
-    <circle r="4" fill="#ffffff" opacity="0.9"/>
+    <circle r="4" fill="#f0f0f0" opacity="0.9"/>
   </g>
 </svg>
