@@ -11,9 +11,10 @@ import threading
 # Suppress Qt style warnings
 os.environ.pop('QT_STYLE_OVERRIDE', None)
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 import requests
+import requests.adapters
 from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QWidget, QPushButton,
@@ -67,15 +68,30 @@ class Fan:
     speed: int = 50  # PWM percentage 0-100
     rpm: int = 0
     last_speed: int = 50  # Remember last speed for toggle
+    _session: Optional[requests.Session] = field(default=None, init=False, repr=False, compare=False)
     
     @property
     def base_url(self) -> str:
         return f"http://{self.ip}:{self.port}"
     
+    @property
+    def session(self) -> requests.Session:
+        """Get or create a session for connection pooling"""
+        if self._session is None:
+            self._session = requests.Session()
+            # Set adapter with connection pooling
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=2,
+                max_retries=1
+            )
+            self._session.mount('http://', adapter)
+        return self._session
+    
     def get_status(self) -> Optional[Dict[str, Any]]:
         """Get current fan status"""
         try:
-            response = requests.get(f"{self.base_url}/api/v0/fan/status", timeout=1)
+            response = self.session.get(f"{self.base_url}/api/v0/fan/status", timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == "ok":
@@ -102,10 +118,10 @@ class Fan:
             # Clamp speed to valid range
             speed = max(0, min(100, speed))
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.base_url}/api/v0/fan/0/set",
                 params={"value": speed},
-                timeout=1
+                timeout=3
             )
             
             if response.status_code == 200:
@@ -630,7 +646,7 @@ class ControlPopup(QWidget):
         if not self.update_timer:
             self.update_timer = QTimer()
             self.update_timer.timeout.connect(self.update_all_fans)
-            self.update_timer.start(500)  # Update every 500ms
+            self.update_timer.start(1000)  # Update every 1 second
     
     def stop_updates(self):
         """Stop real-time fan status updates"""
