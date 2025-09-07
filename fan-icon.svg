@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fan blades -->
+  <g transform="translate(50,50)">
+    <!-- Center circle -->
+    <circle r="8" fill="#4a9eff" stroke="#2c7fd8" stroke-width="2"/>
+    
+    <!-- Fan blades (4 blades) -->
+    <g id="blades" stroke="#2c7fd8" stroke-width="1.5" fill="#6bb2ff">
+      <!-- Top blade -->
+      <path d="M 0,-8 Q -12,-20 -8,-35 Q 0,-40 8,-35 Q 12,-20 0,-8 Z"/>
+      <!-- Right blade -->
+      <path d="M 8,0 Q 20,-12 35,-8 Q 40,0 35,8 Q 20,12 8,0 Z"/>
+      <!-- Bottom blade -->
+      <path d="M 0,8 Q 12,20 8,35 Q 0,40 -8,35 Q -12,20 0,8 Z"/>
+      <!-- Left blade -->
+      <path d="M -8,0 Q -20,12 -35,8 Q -40,0 -35,-8 Q -20,-12 -8,0 Z"/>
+    </g>
+    
+    <!-- Center dot -->
+    <circle r="4" fill="#ffffff" opacity="0.9"/>
+  </g>
+</svg>

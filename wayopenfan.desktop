@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WayOpenFan
+Comment=System tray controller for OpenFan devices
+Exec=/usr/local/bin/wayopenfan
+Icon=wayopenfan
+Terminal=false
+Categories=Utility;Settings;
+StartupNotify=false
+Keywords=fan;control;openfan;cooling;
